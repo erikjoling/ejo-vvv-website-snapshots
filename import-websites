@@ -1,0 +1,121 @@
+#!/bin/bash
+#
+# Import websites from backup-directory to www-dir on provision.
+# Caution! Backup overwrites current website if it exists! 
+
+www_dir="/srv/www/"
+conf_file="/srv/www/import-websites.conf"
+www_backups_dir="/srv/www-backups/"
+
+create_conf_file(){
+	echo "# Wether to import backups on provision or not" >> "$conf_file"
+	echo "#" >> "$conf_file"
+	echo "# This file is created due to inability to create custom trigger" >> "$conf_file"
+	echo "#" >> "$conf_file"
+	echo "# Usage:" >> "$conf_file"
+	echo "# Imports backups when a line with 'import_websites' is found" >> "$conf_file"
+	echo "# Otherwise importing is skipped" >> "$conf_file"
+	echo "" >> "$conf_file"
+	echo "# import_websites" >> "$conf_file"
+}
+
+import_website() {
+	local website="$1"
+	local website_backup="$2"
+
+
+	# Check if website already exists
+	if [ -d "$website" ]; then
+		echo " * Skipping... $website already exists."
+	else
+		# Create website from backup
+		echo " * Extracting $website from backup..."
+		# tar -xvf "$website_backup" -C "$www_dir"
+	fi
+	
+	echo " * Finished importing $website_backup to $website"; echo
+}
+
+printf "\nStart importing websites from www-backups\n"
+
+# Create backup directory if it does not exist
+if [[ ! -d "$www_backups_dir" ]]; then
+	echo " * \"$www_backups_dir\" does not exist"
+	echo " * Creating it right away..."
+	mkdir "$www_backups_dir"
+
+# Create conf_file if it does not exist
+elif [[ ! -f "$conf_file" ]]; then
+	echo " * \"$conf_file\" does not exist"
+	echo " * Creating it right away..."
+
+	create_conf_file
+
+# Check if import_websites is set in configuration-file
+elif grep -Fxq "import_websites" $conf_file; then
+
+	# Loop through www_backups_dir
+	for website_backup in "$www_backups_dir"*.tar; do
+
+		# Only proceed if website_backup exists (somehow an iteration is made even on empty www_backups_dir)
+		if [ -f "$website_backup" ]; then
+
+			# Get filename of backup
+			filename=$(basename "${website_backup}")		
+
+			# Get filename without extension
+			pre_dot=${filename%%.tar}
+
+			# Build website path
+			website="$www_dir$pre_dot/"
+
+			echo " * Importing $website_backup to $website"
+
+			# # Delete website if it already exists
+			# if [ -d "$website" ]; then
+			# 	echo " * Website already exists. Removing it..."
+			# 	chmod -R 777 "$website"
+			# 	rm -rf "$website"
+			# fi
+
+			# # Try to remove again if there are files left 
+			# if [ -d "$website" ]; then
+			# 	echo " * Website still exists. Second try to remove it..."
+			# 	rm -rf "$website"
+			# fi
+
+			# # Check if website still exists
+			# if [ -d "$website" ]; then
+			# 	echo " * Problems removing $website. Skipping it..."
+			# else
+			# 	# Create website from backup
+			# 	echo " * Extracting $website from backup..."
+			# 	tar -xvf "$website_backup" -C "$www_dir"
+			# fi
+
+			# # Check if website already exists
+			# if [ -d "$website" ]; then
+			# 	echo " * Skipping... $website already exists."
+			# else
+			# 	# Create website from backup
+			# 	echo " * Extracting $website from backup..."
+			# 	tar -xvf "$website_backup" -C "$www_dir"
+			# fi
+			
+			# echo " * Finished importing $website_backup to $website"; echo
+
+			import_website "$website" "$website_backup"
+		fi
+	done
+
+	# Reset configuration file so that it doesn't automatically import on next provision
+	echo " * Resetting configuration-file"
+	rm "$conf_file"
+	create_conf_file
+
+else 
+	echo " * Skipping import..."
+	echo " * See \"$conf_file\""
+fi
+
+printf "Finished importing websites from www-backups\n"
