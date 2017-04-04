@@ -1,0 +1,187 @@
+#!/bin/bash  
+#
+# Create a backup in `www-backups` for each website 
+
+# Directory with active websites
+glob_www_dir="/vagrant/www/"
+
+# Directory to temporarily store backups
+glob_tmp_backup_dir="${glob_www_dir}tmp-backups/"
+
+# Directory to store backups
+glob_www_backup_dir="/vagrant/project-backups/"
+
+# File to identify if website is WordPress
+glob_wp_check_file="wp-config.php"
+
+# Directories to exclude from backup
+glob_excluded_website_dirs=(
+	"$glob_tmp_backup_dir"
+	"$glob_www_dir"default/
+	"$glob_www_dir"phpcs/
+	"$glob_www_dir"wordpress-default/
+	"$glob_www_dir"wordpress-develop/
+	"$glob_www_dir"wp-cli/
+)
+
+# Create temporary backup directory
+create_backup_dir() {
+	# Create backup directory if it does not exist
+	if [[ ! -d "$glob_www_backup_dir" ]]; then
+		echo " * Backup Directory Does not exist. Creating it..."
+		mkdir "$glob_www_backup_dir"
+	fi
+}
+
+# Create temporary backup directory
+create_tmp_backup_dir() {
+
+	# Create temporary backup directory if it does not exist
+	if [[ ! -d "$glob_tmp_backup_dir" ]]; then
+		echo " * Creating Temporary Backup Directory..."
+		mkdir "$glob_tmp_backup_dir"
+	fi
+}
+
+# Check if website directory is wordpress
+is_wordpress_website() {
+	local website_dir="$1"
+
+	if [[ -f "$website_dir$glob_wp_check_file" ]]; then
+		true
+	else
+		false
+	fi
+}
+
+# Generate backup for wordpress website
+generate_wordpress_website_backup() {
+	local website_dir="$1" 									# website directory
+	local website=$(basename "$website_dir") 				# Extract website-slug
+	
+	local backup_file="$glob_www_backup_dir$website.tar" 		# Generate name for backup-file
+	local tmp_backup_file="$glob_tmp_backup_dir$website.tar" 	# Generate name for temporary backup-file
+
+	echo " * Creating \"$tmp_backup_file\"..."
+
+	echo " * Backing up wp-config and version.php..."	
+	tar -cf "$tmp_backup_file" -C "$glob_www_dir" "$website/wp-config.php"
+	tar -rf "$tmp_backup_file" -C "$glob_www_dir" "$website/wp-includes/version.php"
+
+	# echo " * Backing up uploads..."	
+	# tar -rf "$tmp_backup_file" -C "$glob_www_dir" "$website/wp-content/uploads/"
+
+	# Backup Theme list
+	"/vagrant/config/homebin/www_backup_helpers/generate_theme_list.sh" "$website_dir"
+
+	echo " * Backing up theme list..."	
+	tar -rf "$tmp_backup_file" -C "$glob_www_dir" "$website/wp-content/themes/theme-list.csv"
+	rm "$glob_www_dir$website/wp-content/themes/theme-list.csv"
+	echo " * Removed theme list..."	
+
+	# Backup Plugin list
+	"/vagrant/config/homebin/www_backup_helpers/generate_plugin_list.sh" "$website_dir"
+	
+	echo " * Backing up plugin list..."	
+	tar -rf "$tmp_backup_file" -C "$glob_www_dir" "$website/wp-content/plugins/plugin-list.csv"
+	rm "$glob_www_dir$website/wp-content/plugins/plugin-list.csv"
+	echo " * Removed plugin list..."	
+}
+
+# Generate backup for non-wordpress website
+generate_other_website_backup() {
+	local website_dir="$1" 										# website directory
+	local website=$(basename "$website_dir") 					# Extract website-slug
+	
+	local backup_file="$glob_www_backup_dir$website.tar" 		# Generate name for backup-file
+	local tmp_backup_file="$glob_tmp_backup_dir$website.tar" 	# Generate name for temporary backup-file
+
+	echo " * Creating \"$backup_file\"..."
+	tar -cf "$tmp_backup_file" -C "$glob_www_dir" "$website" --exclude='*/node_modules' --exclude='.git'
+	tar -rf "$tmp_backup_file" -C "$glob_www_dir" "$website/.git/HEAD"
+}
+
+# Generate backups
+generate_website_backups() {
+
+	echo " * Start looping through $glob_www_dir"
+
+	# Loop through www_dir
+	for website_dir in "$glob_www_dir"*/; do
+
+		# Only proceed if website_dir exists (somehow an iteration is made even on empty www_dir)
+		if [[ -d "$website_dir" && ! ${glob_excluded_website_dirs[*]} =~ "$website_dir" ]]; then
+
+			echo "-----------------------------"
+			echo "Start Backing up $website_dir"
+
+			if is_wordpress_website "$website_dir"; then
+
+				echo " * Website is WordPress"
+				# Generate Backups for WordPress websites
+				generate_wordpress_website_backup "$website_dir"
+				# echo "Generate Wordpress website $website_dir"
+			else				    	
+
+				echo " * Website is non-WordPress"
+				# Generate Backups for other websites
+		  		generate_other_website_backup "$website_dir"
+				# echo "Generate other website $website_dir"		
+			fi
+
+			echo "Finished Backing up $website_dir"
+		fi
+	done
+	echo "-----------------------------"
+	echo " * Finished looping through $glob_www_dir"
+}
+
+# Move temporary backups to permanent location
+move_tmp_backups() {
+	echo " * Start Moving Temporary Backups..."
+
+	# Loop through tmp_backup_dir
+	for tmp_backup_file in "$glob_tmp_backup_dir"*.tar; do
+
+		# Check if backup_file is file
+		if [[ -f "$tmp_backup_file" ]]; then
+
+			echo "   - Moving \"$tmp_backup_file\"..."
+
+			# Move backup to permanent location
+			# echo "Moving $tmp_backup_file to $www_backup_dir"
+			mv "$tmp_backup_file" "$glob_www_backup_dir"
+		fi
+	done
+
+	echo " * Finished Moving Temporary Backups"
+}
+
+# Delete temporary backup directory
+delete_tmp_backup_dir() {
+	if [[ -d "$glob_tmp_backup_dir" ]]; then
+		echo " * Removing Temporary Backup Directory..."
+		rmdir "$glob_tmp_backup_dir"
+	fi
+}
+
+# START!
+echo
+echo "[START] Backup Process...";
+
+# Create Backup Dir
+create_backup_dir
+
+# Create Temporary Backup dir
+create_tmp_backup_dir
+
+# Generate Website backups
+generate_website_backups
+
+# Move Website backups to final backup destination
+move_tmp_backups
+
+# Remove Temporary Backup dir
+delete_tmp_backup_dir
+
+echo "[COMPLETED] Backup Process"; echo
